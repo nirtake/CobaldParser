@@ -1,4 +1,3 @@
-from typing import override
 
 import nltk
 from nltk.tokenize import sent_tokenize, word_tokenize
@@ -16,12 +15,12 @@ class ConlluTokenClassificationPipeline(Pipeline):
         super().__init__(model=model, **kwargs)
         self.language = language
 
-    @override
+   
     def _sanitize_parameters(self, conllu: bool = False, **kwargs):
         # capture conllu flag for postprocessing
         return {}, {}, {'conllu': conllu}
 
-    @override
+    
     def preprocess(self, inputs: str) -> dict:
         if not isinstance(inputs, str):
             raise ValueError("pipeline input must be string (text)")
@@ -36,11 +35,11 @@ class ConlluTokenClassificationPipeline(Pipeline):
         ]
         return {"words": words}
 
-    @override
+    
     def _forward(self, model_inputs: dict) -> dict:
         return self.model(**model_inputs, inference_mode=True)
 
-    @override
+    
     def postprocess(self, model_outputs: dict, conllu: bool = False) -> list[dict] | str:
         sentences = self._decode_model_output(model_outputs)
         # Format sentences into CoNLL-U string if requested.

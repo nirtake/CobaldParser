@@ -137,23 +137,24 @@ def transform_fields(sentence: dict) -> dict:
 
     # Enhanced syntax.
     if DEPS in sentence:
-        eud_arcs_from, eud_arcs_to, eud_deprels = zip(
-            *[
-                (
-                    # Same.
-                    id2idx[head_id] if head_id != ROOT_HEAD else id2idx[token_id],
-                    id2idx[token_id],
-                    deprel
-                )
-                for token_id, deps in zip(sentence[ID], sentence[DEPS])
-                for head_id, deprel in json.loads(deps).items()
-                if deps is not None
-            ]
-        )
-        result[EUD_ARC_FROM] = eud_arcs_from
-        result[EUD_ARC_TO] = eud_arcs_to
-        result[EUD_DEPREL] = eud_deprels
-
+      eud_arcs_from = []
+      eud_arcs_to = []
+      eud_deprels = []
+      for token_id, deps in zip(sentence[ID], sentence[DEPS]):
+          if not deps:  # обработка None и пустых строк
+              continue
+          # если head_id и token_id — числа, приводим к строке
+          for head_id, deprel in json.loads(deps).items():
+              head_id_str = str(head_id)
+              token_id_str = str(token_id)
+              from_idx = id2idx[head_id_str] if head_id != ROOT_HEAD else id2idx[token_id_str]
+              to_idx = id2idx[token_id_str]
+              eud_arcs_from.append(from_idx)
+              eud_arcs_to.append(to_idx)
+              eud_deprels.append(deprel)
+      result[EUD_ARC_FROM] = eud_arcs_from
+      result[EUD_ARC_TO] = eud_arcs_to
+      result[EUD_DEPREL] = eud_deprels
     return result
 
 

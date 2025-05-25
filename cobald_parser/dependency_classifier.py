@@ -1,4 +1,3 @@
-from typing import override
 from copy import deepcopy
 
 import numpy as np
@@ -127,7 +126,7 @@ class DependencyHead(DependencyHeadBase):
     Basic UD syntax specialization that predicts single edge for each token.
     """
 
-    @override
+  
     def predict_arcs(
         self,
         s_arc: Tensor,           # [batch_size, seq_len, seq_len]
@@ -189,7 +188,6 @@ class DependencyHead(DependencyHeadBase):
         return pred_arcs
 
     @staticmethod
-    @override
     def calc_arc_loss(
         s_arc: Tensor,         # [batch_size, seq_len, seq_len]
         gold_arcs: LongTensor  # [n_arcs, 4]
@@ -203,7 +201,6 @@ class MultiDependencyHead(DependencyHeadBase):
     Enhanced UD syntax specialization that predicts multiple edges for each token.
     """
 
-    @override
     def predict_arcs(
         self,
         s_arc: Tensor,           # [batch_size, seq_len, seq_len]
@@ -216,7 +213,6 @@ class MultiDependencyHead(DependencyHeadBase):
         return arc_probs.round().long()
 
     @staticmethod
-    @override
     def calc_arc_loss(
         s_arc: Tensor,         # [batch_size, seq_len, seq_len]
         gold_arcs: LongTensor  # [n_arcs, 4]

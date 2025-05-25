@@ -1,5 +1,5 @@
 import os
-from typing import override
+
 
 from torch.optim import AdamW
 from datasets import load_dataset
@@ -88,7 +88,6 @@ This model parses a pre-tokenized CoNLL-U text and jointly labels each token wit
 
 
 class CustomTrainer(Trainer):
-    @override
     def create_model_card(self, **kwargs):
         """Create custom model card."""
 
@@ -140,7 +139,7 @@ class CustomTrainer(Trainer):
         model_card_filepath = os.path.join(self.args.output_dir, "README.md")
         card.save(model_card_filepath)
 
-    @override
+
     def create_optimizer(self):
         # Implement discriminative‐finetuning.
         # NOTE: it breaks multiple CLI features like `--fp16` and `--fsdp`, but
@@ -275,7 +274,7 @@ if __name__ == "__main__":
         model=model,
         args=training_args,
         train_dataset=dataset_dict['train'],
-        eval_dataset=dataset_dict['validation'],
+        eval_dataset=dataset_dict['test'],
         data_collator=collate_with_padding,
         # Wth? See notes at compute_metrics.
         compute_metrics=lambda x: compute_metrics(x, training_args.label_names),
