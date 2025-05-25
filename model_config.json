@@ -1,5 +1,5 @@
 {
-  "encoder_model_name": "distilbert-base-uncased",
+  "encoder_model_name": "xlm-roberta-base",
   "null_classifier_hidden_size": 512,
   "lemma_classifier_hidden_size": 512,
   "morphology_classifier_hidden_size": 512,
