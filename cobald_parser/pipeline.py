@@ -16,7 +16,7 @@ class ConlluTokenClassificationPipeline(Pipeline):
         self.tokenizer = tokenizer
         self.sentenizer = sentenizer
 
-    @override
+    #@override
     def _sanitize_parameters(self, output_format: str = 'list', **kwargs):
         if output_format not in ['list', 'str']:
             raise ValueError(
@@ -43,7 +43,7 @@ class ConlluTokenClassificationPipeline(Pipeline):
     def _forward(self, model_inputs: dict) -> dict:
         return self.model(**model_inputs, inference_mode=True)
 
-    @override
+    #@override
     def postprocess(self, model_outputs: dict, output_format: str) -> list[dict] | str:
         sentences = self._decode_model_output(model_outputs)
         # Format sentences into CoNLL-U string if requested.
