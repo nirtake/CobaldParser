@@ -7,5 +7,10 @@
   "misc_classifier_hidden_size": 512,
   "deepslot_classifier_hidden_size": 256,
   "semclass_classifier_hidden_size": 512,
-  "consecutive_null_limit": 3
+  "consecutive_null_limit": 3,
+  "use_lora": true,
+  "lora_r": 8,
+  "lora_alpha": 16,
+  "lora_dropout": 0.05,
+  "lora_target_modules": ["q_proj", "v_proj"]
 }

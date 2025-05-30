@@ -4,16 +4,51 @@ from torch import Tensor, LongTensor
 
 from transformers import AutoTokenizer, AutoModel
 
+try:
+    from peft import LoraConfig, get_peft_model
+    PEFT_AVAILABLE = True
+except ImportError:
+    PEFT_AVAILABLE = False
+
+from typing import Optional, List
 
 class WordTransformerEncoder(nn.Module):
     """
     Encodes sentences into word-level embeddings using a pretrained MLM transformer.
+    Optionally enables LoRA fine-tuning adapters.
     """
-    def __init__(self, model_name: str):
+    def __init__(
+        self,
+        model_name: str,
+        use_lora: bool = False,
+        lora_r: int = 8,
+        lora_alpha: int = 16,
+        lora_dropout: float = 0.05,
+        lora_target_modules: Optional[List[str]] = None
+    ):
         super().__init__()
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        # Model like BERT, RoBERTa, etc.
         self.model = AutoModel.from_pretrained(model_name)
+
+        if use_lora:
+            if not PEFT_AVAILABLE:
+                raise ImportError("peft is required for LoRA fine-tuning. Install with `pip install peft`.")
+            if lora_target_modules is None:
+                # XLM-RoBERTa и Roberta-family
+                if "roberta" in model_name.lower():
+                    lora_target_modules = ["q_proj", "v_proj"]
+                else:
+                    lora_target_modules = ["query", "value"]
+            lora_config = LoraConfig(
+                r=lora_r,
+                lora_alpha=lora_alpha,
+                target_modules=lora_target_modules,
+                lora_dropout=lora_dropout,
+                bias="none",
+                task_type="SEQ_CLS"
+            )
+            self.model = get_peft_model(self.model, lora_config)
+            print(f"LoRA enabled: r={lora_r}, alpha={lora_alpha}, target_modules={lora_target_modules}")
 
     def forward(self, words: list[list[str]]) -> Tensor:
         """

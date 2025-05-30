@@ -254,58 +254,45 @@ class DependencyClassifier(nn.Module):
         self.rel_dep_mlp = deepcopy(self.arc_dep_mlp)
         self.rel_head_mlp = deepcopy(self.arc_dep_mlp)
 
-         # ДОБАВЛЯЕМ extra слой для каждого
-        self.arc_dep_extra = nn.Linear(hidden_size, hidden_size if extra_hidden_size is None else extra_hidden_size)
-        self.arc_head_extra = nn.Linear(hidden_size, hidden_size if extra_hidden_size is None else extra_hidden_size)
-        self.rel_dep_extra = nn.Linear(hidden_size, hidden_size if extra_hidden_size is None else extra_hidden_size)
-        self.rel_head_extra = nn.Linear(hidden_size, hidden_size if extra_hidden_size is None else extra_hidden_size)
-
-        for param in self.arc_dep_mlp.parameters():
-            param.requires_grad = False
-        for param in self.arc_head_mlp.parameters():
-            param.requires_grad = False
-        for param in self.rel_dep_mlp.parameters():
-            param.requires_grad = False
-        for param in self.rel_head_mlp.parameters():
-            param.requires_grad = False
-        for param in self.arc_dep_extra.parameters():
-            param.requires_grad = True
-        for param in self.arc_head_extra.parameters():
-            param.requires_grad = True
-        for param in self.rel_dep_extra.parameters():
-            param.requires_grad = True
-        for param in self.rel_head_extra.parameters():
-            param.requires_grad = True
-
         self.dependency_head_ud = DependencyHead(hidden_size, n_rels_ud)
         self.dependency_head_eud = MultiDependencyHead(hidden_size, n_rels_eud)
 
     def forward(
         self,
-        embeddings: Tensor,
-        gold_ud: Tensor,
-        gold_eud: Tensor,
-        null_mask: Tensor,
-        padding_mask: Tensor
+        embeddings: Tensor,    # [batch_size, seq_len, embedding_size]
+        gold_ud: Tensor,       # [n_ud_arcs, 4]
+        gold_eud: Tensor,      # [n_eud_arcs, 4]
+        null_mask: Tensor,     # [batch_size, seq_len]
+        padding_mask: Tensor   # [batch_size, seq_len]
     ) -> dict[str, Tensor]:
-        # Старые mlp -> новые extra
-        h_arc_head = self.arc_head_extra(self.arc_head_mlp(embeddings))
-        h_arc_dep = self.arc_dep_extra(self.arc_dep_mlp(embeddings))
-        h_rel_head = self.rel_head_extra(self.rel_head_mlp(embeddings))
-        h_rel_dep = self.rel_dep_extra(self.rel_dep_mlp(embeddings))
 
+        # - [batch_size, seq_len, hidden_size]
+        h_arc_head = self.arc_head_mlp(embeddings)
+        h_arc_dep = self.arc_dep_mlp(embeddings)
+        h_rel_head = self.rel_head_mlp(embeddings)
+        h_rel_dep = self.rel_dep_mlp(embeddings)
+
+        # Share the h vectors between dependency and multi-dependency heads.
         output_ud = self.dependency_head_ud(
-            h_arc_head, h_arc_dep, h_rel_head, h_rel_dep,
+            h_arc_head,
+            h_arc_dep,
+            h_rel_head,
+            h_rel_dep,
             gold_arcs=gold_ud,
             null_mask=null_mask,
             padding_mask=padding_mask
         )
         output_eud = self.dependency_head_eud(
-            h_arc_head, h_arc_dep, h_rel_head, h_rel_dep,
+            h_arc_head,
+            h_arc_dep,
+            h_rel_head,
+            h_rel_dep,
             gold_arcs=gold_eud,
+            # Ignore null mask in E-UD
             null_mask=torch.ones_like(padding_mask),
             padding_mask=padding_mask
         )
+
         return {
             'preds_ud': output_ud["preds"],
             'preds_eud': output_eud["preds"],

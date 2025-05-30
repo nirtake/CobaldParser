@@ -18,6 +18,12 @@ class CobaldParserConfig(PretrainedConfig):
         dropout: float = 0.1,
         consecutive_null_limit: int = 0,
         vocabulary: dict[dict[int, str]] = {},
+        # LoRA params (новое!)
+        use_lora: bool = False,
+        lora_r: int = 8,
+        lora_alpha: int = 16,
+        lora_dropout: float = 0.05,
+        lora_target_modules: list = None,
         **kwargs
     ):
         self.encoder_model_name = encoder_model_name
@@ -33,6 +39,11 @@ class CobaldParserConfig(PretrainedConfig):
         self.dropout = dropout
         # The serialized config stores mappings as strings,
         # e.g. {"0": "acl", "1": "conj"}, so we have to convert them to int.
+        self.use_lora = use_lora
+        self.lora_r = lora_r
+        self.lora_alpha = lora_alpha
+        self.lora_dropout = lora_dropout
+        self.lora_target_modules = lora_target_modules
         self.vocabulary = {
             column: {int(k): v for k, v in labels.items()}
             for column, labels in vocabulary.items()
