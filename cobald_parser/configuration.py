@@ -26,6 +26,8 @@ class CobaldParserConfig(PretrainedConfig):
         lora_target_modules: list = None,
         **kwargs
     ):
+        print("DEBUG (encoder): use_lora:", use_lora)
+        print("DEBUG (encoder): lora_target_modules:", lora_target_modules)
         self.encoder_model_name = encoder_model_name
         self.null_classifier_hidden_size = null_classifier_hidden_size
         self.consecutive_null_limit = consecutive_null_limit

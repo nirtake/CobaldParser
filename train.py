@@ -31,6 +31,16 @@ from src.processing import (
 )
 from src.metrics import compute_metrics
 
+def freeze_encoder_except_lora(model):
+    for name, param in model.encoder.named_parameters():
+        if "lora_" in name:
+            continue
+        param.requires_grad = False
+
+def print_trainable_params(model):
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            print(f"Trainable: {name}, shape={tuple(param.shape)}")
 
 def export_vocabulary(train_dataset_features, config):
     for column in [LEMMA_RULE, JOINT_FEATS, UD_DEPREL, EUD_DEPREL, MISC, DEEPSLOT, SEMCLASS]:
@@ -246,6 +256,8 @@ if __name__ == "__main__":
 
     # Create and configure model.
     model_config = CobaldParserConfig.from_json_file(custom_args.model_config)
+    print("DEBUG: model_config.use_lora =", model_config.use_lora)
+    print("DEBUG: model_config.lora_target_modules =", model_config.lora_target_modules)
     # Export vocabulary to config (as it must be saved along the model).
     export_vocabulary(dataset_dict['train'].features, model_config)
 
@@ -265,6 +277,9 @@ if __name__ == "__main__":
             training_args.label_names.append(parser_input)
 
     model = CobaldParser(model_config)
+    if getattr(model_config, "use_lora", False):
+      freeze_encoder_except_lora(model)
+    print_trainable_params(model)
 
     if custom_args.finetune_from:
         pretrained_model = CobaldParser.from_pretrained(
@@ -283,7 +298,7 @@ if __name__ == "__main__":
         data_collator=collate_with_padding,
         # Wth? See notes at compute_metrics.
         compute_metrics=lambda x: compute_metrics(x, training_args.label_names),
-        callbacks=[unfreeze_callback]
+        #callbacks=[unfreeze_callback]
     )
     trainer.train(ignore_keys_for_eval=["words", "sent_ids", "texts"])
 
@@ -291,4 +306,4 @@ if __name__ == "__main__":
     trainer.save_model()
 
     pipe = ConlluTokenClassificationPipeline(model)
-    pipe.push_to_hub(training_args.hub_model_id)
+    pipe.push_to_hub('E-katrin/lora_check')

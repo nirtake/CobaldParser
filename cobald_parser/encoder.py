@@ -34,18 +34,14 @@ class WordTransformerEncoder(nn.Module):
             if not PEFT_AVAILABLE:
                 raise ImportError("peft is required for LoRA fine-tuning. Install with `pip install peft`.")
             if lora_target_modules is None:
-                # XLM-RoBERTa и Roberta-family
-                if "roberta" in model_name.lower():
-                    lora_target_modules = ["q_proj", "v_proj"]
-                else:
-                    lora_target_modules = ["query", "value"]
+              lora_target_modules = ["query", "value"]
             lora_config = LoraConfig(
                 r=lora_r,
                 lora_alpha=lora_alpha,
                 target_modules=lora_target_modules,
                 lora_dropout=lora_dropout,
                 bias="none",
-                task_type="SEQ_CLS"
+                task_type="FEATURE_EXTRACTION"
             )
             self.model = get_peft_model(self.model, lora_config)
             print(f"LoRA enabled: r={lora_r}, alpha={lora_alpha}, target_modules={lora_target_modules}")

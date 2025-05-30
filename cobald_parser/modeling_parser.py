@@ -24,7 +24,12 @@ class CobaldParser(PreTrainedModel):
         super().__init__(config)
 
         self.encoder = WordTransformerEncoder(
-            model_name=config.encoder_model_name
+            model_name=config.encoder_model_name, 
+            use_lora=getattr(config, "use_lora", False),
+            lora_r=getattr(config, "lora_r", 8),
+            lora_alpha=getattr(config, "lora_alpha", 16),
+            lora_dropout=getattr(config, "lora_dropout", 0.05),
+            lora_target_modules=getattr(config, "lora_target_modules", None),
         )
         embedding_size = self.encoder.get_embedding_size()
 
