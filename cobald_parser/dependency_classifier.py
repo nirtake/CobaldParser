@@ -1,4 +1,3 @@
-#from typing import override
 from copy import deepcopy
 
 import numpy as np
@@ -38,19 +37,21 @@ class DependencyHeadBase(nn.Module):
 
     def forward(
         self,
-        h_arc_head: Tensor,    # [batch_size, seq_len, hidden_size]
-        h_arc_dep: Tensor,     # ...
-        h_rel_head: Tensor,    # ...
-        h_rel_dep: Tensor,     # ...
-        gold_arcs: LongTensor, # [batch_size, seq_len, seq_len]
-        mask: BoolTensor       # [batch_size, seq_len]
+        h_arc_head: Tensor,        # [batch_size, seq_len, hidden_size]
+        h_arc_dep: Tensor,         # ...
+        h_rel_head: Tensor,        # ...
+        h_rel_dep: Tensor,         # ...
+        gold_arcs: LongTensor,     # [batch_size, seq_len, seq_len]
+        null_mask: BoolTensor,     # [batch_size, seq_len]
+        padding_mask: BoolTensor   # [batch_size, seq_len]
     ) -> dict[str, Tensor]:
-
+        
         # Score arcs.
-        # s_arc[:, i, j] = score of edge j -> i.
+        # s_arc[:, i, j] = score of edge i -> j.
         s_arc = self.arc_attention(h_arc_head, h_arc_dep)
         # Mask undesirable values (padding, nulls, etc.) with -inf.
-        replace_masked_values(s_arc, pairwise_mask(mask), replace_with=-1e8)
+        mask2d = pairwise_mask(null_mask & padding_mask)
+        replace_masked_values(s_arc, mask2d, replace_with=-1e8)
         # Score arcs' relations.
         # [batch_size, seq_len, seq_len, num_labels]
         s_rel = self.rel_attention(h_rel_head, h_rel_dep).permute(0, 2, 3, 1)
@@ -63,11 +64,11 @@ class DependencyHeadBase(nn.Module):
 
         # Predict arcs based on the scores.
         # [batch_size, seq_len, seq_len]
-        pred_arcs_3d = self.predict_arcs(s_arc, mask)
+        pred_arcs_matrix = self.predict_arcs(s_arc, null_mask, padding_mask)
         # [batch_size, seq_len, seq_len]
-        pred_rels_3d = self.predict_rels(s_rel)
+        pred_rels_matrix = self.predict_rels(s_rel)
         # [n_pred_arcs, 4]
-        preds_combined = self.combine_arcs_rels(pred_arcs_3d, pred_rels_3d)
+        preds_combined = self.combine_arcs_rels(pred_arcs_matrix, pred_rels_matrix)
         return {
             'preds': preds_combined,
             'loss': loss
@@ -91,8 +92,9 @@ class DependencyHeadBase(nn.Module):
     
     def predict_arcs(
         self,
-        s_arc: Tensor,   # [batch_size, seq_len, seq_len]
-        mask: BoolTensor # [batch_size, seq_len]
+        s_arc: Tensor,           # [batch_size, seq_len, seq_len]
+        null_mask: BoolTensor,   # [batch_size, seq_len]
+        padding_mask: BoolTensor # [batch_size, seq_len]
     ) -> LongTensor:
         """Predict arcs from scores."""
         raise NotImplementedError
@@ -124,45 +126,45 @@ class DependencyHead(DependencyHeadBase):
     Basic UD syntax specialization that predicts single edge for each token.
     """
 
-    #@override
+  
     def predict_arcs(
         self,
-        s_arc: Tensor,   # [batch_size, seq_len, seq_len]
-        mask: BoolTensor # [batch_size, seq_len]
+        s_arc: Tensor,           # [batch_size, seq_len, seq_len]
+        null_mask: BoolTensor,   # [batch_size, seq_len]
+        padding_mask: BoolTensor # [batch_size, seq_len, seq_len]
     ) -> Tensor:
 
         if self.training:
             # During training, use fast greedy decoding.
             # - [batch_size, seq_len]
-            pred_arcs_seq = s_arc.argmax(dim=-1)
+            pred_arcs_seq = s_arc.argmax(dim=1)
         else:
-            # During inference, diligently decode Maximum Spanning Tree.
-            pred_arcs_seq = self._mst_decode(s_arc, mask)
             # FIXME
-            # pred_arcs_seq = s_arc.argmax(dim=-1)
+            # During inference, decode Maximum Spanning Tree.
+            # pred_arcs_seq = self._mst_decode(s_arc, padding_mask)
+            pred_arcs_seq = s_arc.argmax(dim=1)
 
         # Upscale arcs sequence of shape [batch_size, seq_len]
         # to matrix of shape [batch_size, seq_len, seq_len].
-        pred_arcs = F.one_hot(pred_arcs_seq, num_classes=pred_arcs_seq.size(1)).long()
+        pred_arcs = F.one_hot(pred_arcs_seq, num_classes=pred_arcs_seq.size(1)).long().transpose(1, 2)
+        # Apply mask one more time (even though s_arc is already masked),
+        # because argmax erases information about masked values.
+        mask2d = pairwise_mask(null_mask & padding_mask)
+        replace_masked_values(pred_arcs, mask2d, replace_with=0)
         return pred_arcs
 
     def _mst_decode(
         self,
-        s_arc: Tensor, # [batch_size, seq_len, seq_len]
-        mask: Tensor   # [batch_size, seq_len]
+        s_arc: Tensor,    # [batch_size, seq_len, seq_len]
+        padding_mask: Tensor
     ) -> tuple[Tensor, Tensor]:
-
+        
         batch_size = s_arc.size(0)
         device = s_arc.device
         s_arc = s_arc.cpu()
 
         # Convert scores to probabilities, as `decode_mst` expects non-negative values.
-        arc_probs = nn.functional.softmax(s_arc, dim=-1)
-        # Transpose arcs, because decode_mst defines 'energy' matrix as
-        #  energy[i,j] = "Score that `i` is the head of `j`",
-        # whereas
-        #  arc_probs[i,j] = "Probability that `j` is the head of `i`".
-        arc_probs = arc_probs.transpose(1, 2)
+        arc_probs = nn.functional.softmax(s_arc, dim=1)
 
         # `decode_mst` knows nothing about UD and ROOT, so we have to manually
         # zero probabilities of arcs leading to ROOT to make sure ROOT is a source node
@@ -177,11 +179,10 @@ class DependencyHead(DependencyHeadBase):
         pred_arcs = []
         for sample_idx in range(batch_size):
             energy = arc_probs[sample_idx]
-            # has_labels=False because we will decode them manually later.
-            lengths = mask[sample_idx].sum()
-            heads, _ = decode_mst(energy, lengths, has_labels=False)
+            length = padding_mask[sample_idx].sum()
+            heads = decode_mst(energy, length)
             # Some nodes may be isolated. Pick heads greedily in this case.
-            heads[heads <= 0] = s_arc[sample_idx].argmax(dim=-1)[heads <= 0]
+            heads[heads <= 0] = s_arc[sample_idx].argmax(dim=1)[heads <= 0]
             pred_arcs.append(heads)
 
         # shape: [batch_size, seq_len]
@@ -189,13 +190,12 @@ class DependencyHead(DependencyHeadBase):
         return pred_arcs
 
     @staticmethod
-    #@override
     def calc_arc_loss(
         s_arc: Tensor,         # [batch_size, seq_len, seq_len]
         gold_arcs: LongTensor  # [n_arcs, 4]
     ) -> tuple[Tensor, Tensor]:
         batch_idxs, from_idxs, to_idxs, _ = gold_arcs.T
-        return F.cross_entropy(s_arc[batch_idxs, from_idxs], to_idxs)
+        return F.cross_entropy(s_arc[batch_idxs, :, to_idxs], from_idxs)
 
 
 class MultiDependencyHead(DependencyHeadBase):
@@ -203,11 +203,11 @@ class MultiDependencyHead(DependencyHeadBase):
     Enhanced UD syntax specialization that predicts multiple edges for each token.
     """
 
-    #@override
     def predict_arcs(
         self,
-        s_arc: Tensor,   # [batch_size, seq_len, seq_len]
-        mask: BoolTensor # [batch_size, seq_len]
+        s_arc: Tensor,           # [batch_size, seq_len, seq_len]
+        null_mask: BoolTensor,   # [batch_size, seq_len]
+        padding_mask: BoolTensor # [batch_size, seq_len]
     ) -> Tensor:
         # Convert scores to probabilities.
         arc_probs = torch.sigmoid(s_arc)
@@ -215,7 +215,6 @@ class MultiDependencyHead(DependencyHeadBase):
         return arc_probs.round().long()
 
     @staticmethod
-    #@override
     def calc_arc_loss(
         s_arc: Tensor,         # [batch_size, seq_len, seq_len]
         gold_arcs: LongTensor  # [n_arcs, 4]
@@ -255,42 +254,58 @@ class DependencyClassifier(nn.Module):
         self.rel_dep_mlp = deepcopy(self.arc_dep_mlp)
         self.rel_head_mlp = deepcopy(self.arc_dep_mlp)
 
+         # ДОБАВЛЯЕМ extra слой для каждого
+        self.arc_dep_extra = nn.Linear(hidden_size, hidden_size if extra_hidden_size is None else extra_hidden_size)
+        self.arc_head_extra = nn.Linear(hidden_size, hidden_size if extra_hidden_size is None else extra_hidden_size)
+        self.rel_dep_extra = nn.Linear(hidden_size, hidden_size if extra_hidden_size is None else extra_hidden_size)
+        self.rel_head_extra = nn.Linear(hidden_size, hidden_size if extra_hidden_size is None else extra_hidden_size)
+
+        for param in self.arc_dep_mlp.parameters():
+            param.requires_grad = False
+        for param in self.arc_head_mlp.parameters():
+            param.requires_grad = False
+        for param in self.rel_dep_mlp.parameters():
+            param.requires_grad = False
+        for param in self.rel_head_mlp.parameters():
+            param.requires_grad = False
+        for param in self.arc_dep_extra.parameters():
+            param.requires_grad = True
+        for param in self.arc_head_extra.parameters():
+            param.requires_grad = True
+        for param in self.rel_dep_extra.parameters():
+            param.requires_grad = True
+        for param in self.rel_head_extra.parameters():
+            param.requires_grad = True
+
         self.dependency_head_ud = DependencyHead(hidden_size, n_rels_ud)
         self.dependency_head_eud = MultiDependencyHead(hidden_size, n_rels_eud)
 
     def forward(
         self,
-        embeddings: Tensor,    # [batch_size, seq_len, embedding_size]
-        gold_ud: Tensor,       # [n_ud_arcs, 4]
-        gold_eud: Tensor,      # [n_eud_arcs, 4]
-        mask_ud: Tensor,       # [batch_size, seq_len]
-        mask_eud: Tensor       # [batch_size, seq_len]
+        embeddings: Tensor,
+        gold_ud: Tensor,
+        gold_eud: Tensor,
+        null_mask: Tensor,
+        padding_mask: Tensor
     ) -> dict[str, Tensor]:
+        # Старые mlp -> новые extra
+        h_arc_head = self.arc_head_extra(self.arc_head_mlp(embeddings))
+        h_arc_dep = self.arc_dep_extra(self.arc_dep_mlp(embeddings))
+        h_rel_head = self.rel_head_extra(self.rel_head_mlp(embeddings))
+        h_rel_dep = self.rel_dep_extra(self.rel_dep_mlp(embeddings))
 
-        # - [batch_size, seq_len, hidden_size]
-        h_arc_head = self.arc_head_mlp(embeddings)
-        h_arc_dep = self.arc_dep_mlp(embeddings)
-        h_rel_head = self.rel_head_mlp(embeddings)
-        h_rel_dep = self.rel_dep_mlp(embeddings)
-
-        # Share the h vectors between dependency and multi-dependency heads.
         output_ud = self.dependency_head_ud(
-            h_arc_head,
-            h_arc_dep,
-            h_rel_head,
-            h_rel_dep,
+            h_arc_head, h_arc_dep, h_rel_head, h_rel_dep,
             gold_arcs=gold_ud,
-            mask=mask_ud
+            null_mask=null_mask,
+            padding_mask=padding_mask
         )
         output_eud = self.dependency_head_eud(
-            h_arc_head,
-            h_arc_dep,
-            h_rel_head,
-            h_rel_dep,
+            h_arc_head, h_arc_dep, h_rel_head, h_rel_dep,
             gold_arcs=gold_eud,
-            mask=mask_eud
+            null_mask=torch.ones_like(padding_mask),
+            padding_mask=padding_mask
         )
-
         return {
             'preds_ud': output_ud["preds"],
             'preds_eud': output_eud["preds"],

@@ -1,5 +1,5 @@
 import os
-#from typing import override
+
 
 from torch.optim import AdamW
 from datasets import load_dataset
@@ -12,7 +12,12 @@ from transformers import (
 from transformers.modelcard import parse_log_history
 from huggingface_hub import ModelCard, ModelCardData, EvalResult
 
-from cobald_parser import CobaldParserConfig, CobaldParser
+from cobald_parser import (
+    CobaldParserConfig,
+    CobaldParser,
+    ConlluTokenClassificationPipeline,
+    TASK_NAME
+)
 from src.processing import (
     preprocess,
     collate_with_padding,
@@ -26,6 +31,10 @@ from src.processing import (
 )
 from src.metrics import compute_metrics
 
+def print_trainable_params(model):
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            print(f"Trainable: {name}, shape={tuple(param.shape)}")
 
 def export_vocabulary(train_dataset_features, config):
     for column in [LEMMA_RULE, JOINT_FEATS, UD_DEPREL, EUD_DEPREL, MISC, DEEPSLOT, SEMCLASS]:
@@ -88,7 +97,6 @@ This model parses a pre-tokenized CoNLL-U text and jointly labels each token wit
 
 
 class CustomTrainer(Trainer):
-    #@override
     def create_model_card(self, **kwargs):
         """Create custom model card."""
 
@@ -131,7 +139,7 @@ class CustomTrainer(Trainer):
                 license='gpl-3.0',
                 metrics=['accuracy', 'f1'],
                 model_name=self.hub_model_id,
-                pipeline_tag='cobald-parsing', # Use the correct task name
+                pipeline_tag=TASK_NAME,
                 tags=['pytorch']
             ),
             template_str=MODELCARD_TEMPLATE,
@@ -140,46 +148,18 @@ class CustomTrainer(Trainer):
         model_card_filepath = os.path.join(self.args.output_dir, "README.md")
         card.save(model_card_filepath)
 
-    #@override
-    def create_optimizer(self):
-        # Implement discriminative‐finetuning.
-        # NOTE: it breaks multiple CLI features like `--fp16` and `--fsdp`, but
-        # we don't need them so far anyway...
 
+    def create_optimizer(self):
         if self.optimizer is not None:
             return self.optimizer
-        
-        base_lr = self.args.learning_rate
-        encoder_lr = base_lr / 5
-        decay = self.args.weight_decay
-        layer_decay = 0.9
-        optimizer_grouped_parameters = []
 
-        # Add classifier with the base LR
-        optimizer_grouped_parameters.append({
-            "params": self.model.classifiers.parameters(),
-            "lr": base_lr,
-            "weight_decay": decay
-        })
-        
-        # Per‐layer parameter groups with decaying LR
-        layers = self.model.encoder.get_transformer_layers()
-        for idx, layer in enumerate(layers):
-            lr = encoder_lr * (layer_decay ** (len(layers) - idx - 1))
-            optimizer_grouped_parameters.append({
-                "params": layer.parameters(),
-                "lr": lr,
-                "weight_decay": decay
-            })
-
-        # Add embeddings with the smallest LR
-        embeddings = self.model.encoder.get_embeddings_layer()
-        smallest_lr = encoder_lr * (layer_decay ** len(layers))
-        optimizer_grouped_parameters.append({
-            "params": embeddings.parameters(),
-            "lr": smallest_lr,
-            "weight_decay": decay
-        })
+        optimizer_grouped_parameters = [
+            {
+                "params": filter(lambda p: p.requires_grad, self.model.parameters()),
+                "lr": self.args.learning_rate,
+                "weight_decay": self.args.weight_decay
+            }
+        ]
 
         self.optimizer = AdamW(
             optimizer_grouped_parameters,
@@ -187,7 +167,6 @@ class CustomTrainer(Trainer):
             eps=self.args.adam_epsilon
         )
         return self.optimizer
-
 
 class GradualUnfreezeCallback(TrainerCallback):
     """Unfreeze one encoder layer per epoch, deepest first."""
@@ -268,6 +247,13 @@ if __name__ == "__main__":
             trust_remote_code=True
         )
         transfer_pretrained(model, pretrained_model)
+    
+    #ДОБАВЛЕНО: у всего, что не classifier, замораживаем веса 
+    for name, param in model.named_parameters():
+        if not name.startswith("classifiers"):
+            param.requires_grad = False
+    #ДОБАВИЛА: проверка обучаемых параметров
+    print_trainable_params(model)
 
     # Create trainer and train the model.
     unfreeze_callback = GradualUnfreezeCallback()
@@ -275,20 +261,16 @@ if __name__ == "__main__":
         model=model,
         args=training_args,
         train_dataset=dataset_dict['train'],
-        eval_dataset=dataset_dict['validation'],
+        eval_dataset=dataset_dict['test'],
         data_collator=collate_with_padding,
         # Wth? See notes at compute_metrics.
         compute_metrics=lambda x: compute_metrics(x, training_args.label_names),
-        callbacks=[unfreeze_callback]
+        #callbacks=[unfreeze_callback]
     )
     trainer.train(ignore_keys_for_eval=["words", "sent_ids", "texts"])
+
     # Save and push model to hub (if push_to_hub is set).
     trainer.save_model()
 
-    from cobald_parser.pipeline import ConlluTokenClassificationPipeline
-
-    pipe = ConlluTokenClassificationPipeline(model, language="english")
-    with open("test_predictions.conllu", "w", encoding="utf-8") as out_f:
-        for example in dataset_dict['test']:
-            pred = pipe(example["text"], conllu=True)
-            out_f.write(pred + "\n\n")
+    pipe = ConlluTokenClassificationPipeline(model)
+    pipe.push_to_hub('E-katrin/encoder_freezed_70epochs_10e-5')

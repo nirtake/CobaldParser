@@ -100,14 +100,23 @@ def transform_fields(sentence: dict) -> dict:
         result[LEMMA_RULE] = [
             construct_lemma_rule(word, lemma)
             if lemma is not None else None
-            for word, lemma in zip(sentence[WORD], sentence[LEMMA])
+            for word, lemma in zip(
+                sentence[WORD],
+                sentence[LEMMA],
+                strict=True
+            )
         ]
     
     if UPOS in sentence or XPOS in sentence or FEATS in sentence:
         result[JOINT_FEATS] = [
-            f"{upos}#{xpos}#{feats}"
+            f"{upos or '_'}#{xpos or '_'}#{feats or '_'}"
             if (upos is not None or xpos is not None or feats is not None) else None
-            for upos, xpos, feats in zip(sentence[UPOS], sentence[XPOS], sentence[FEATS])
+            for upos, xpos, feats in zip(
+                sentence[UPOS],
+                sentence[XPOS],
+                sentence[FEATS],
+                strict=True
+            )
         ]
 
     # Renumerate ids, so that tokens are enumerated from 0 and #NULLs get integer id.
@@ -121,13 +130,18 @@ def transform_fields(sentence: dict) -> dict:
                 (
                     # Replace ROOT with self-loop, it simplifies dependency classifier
                     # implementation a lot.
-                    id2idx[head_id] if head_id != ROOT_HEAD else id2idx[token_id],
+                    id2idx[str(head_id)] if str(head_id) != ROOT_HEAD else id2idx[token_id],
                     id2idx[token_id],
                     deprel
                 )
                 # head_id indicates ID of a token that an arc starts from, while
                 # token_id is an ID of a token the arcs leads to.
-                for token_id, head_id, deprel in zip(sentence[ID], sentence[HEAD], sentence[DEPREL])
+                for token_id, head_id, deprel in zip(
+                    sentence[ID],
+                    sentence[HEAD],
+                    sentence[DEPREL],
+                    strict=True
+                )
                 if head_id is not None
             ]
         )
@@ -145,7 +159,11 @@ def transform_fields(sentence: dict) -> dict:
                     id2idx[token_id],
                     deprel
                 )
-                for token_id, deps in zip(sentence[ID], sentence[DEPS])
+                for token_id, deps in zip(
+                    sentence[ID],
+                    sentence[DEPS],
+                    strict=True
+                )
                 for head_id, deprel in json.loads(deps).items()
                 if deps is not None
             ]

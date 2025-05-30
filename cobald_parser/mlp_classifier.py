@@ -16,6 +16,7 @@ class MlpClassifier(nn.Module):
         activation: str,
         dropout: float,
         class_weights: list[float] = None,
+        extra_hidden_size: int = None,  #новый слой
     ):
         super().__init__()
 
@@ -27,9 +28,20 @@ class MlpClassifier(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(hidden_size, n_classes)
         )
+
+        # Новый дополнительный слой (можно поменять на свой размер)
+        self.extra_output = nn.Linear(n_classes, n_classes if extra_hidden_size is None else extra_hidden_size)
+
         if class_weights is not None:
             class_weights = torch.tensor(class_weights, dtype=torch.long)
         self.cross_entropy = nn.CrossEntropyLoss(weight=class_weights)
+
+        # сразу заморозим все параметры кроме extra_output
+        for param in self.classifier.parameters():
+            param.requires_grad = False
+        for param in self.extra_output.parameters():
+            param.requires_grad = True
+        
 
     def forward(self, embeddings: Tensor, labels: LongTensor = None) -> dict:
         logits = self.classifier(embeddings)
